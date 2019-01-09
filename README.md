@@ -1,0 +1,1 @@
+# ansible-stack-initial-setup
