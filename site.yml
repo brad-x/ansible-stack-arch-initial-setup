@@ -1,0 +1,113 @@
+- name: Apply Initial Setup
+  hosts: localhost
+  connection: local
+  become: false
+  vars:
+    add_packages:
+      - base
+      - base-devel
+      - xorg
+      - xf86-video-ati
+      - gnome
+      - swh-plugins
+      - vim
+      - python-nautilus
+      - ttf-dejavu
+      - ttf-croscore
+      - chromium
+      - nextcloud-client
+      - vlc
+      - code
+      - nfs-utils
+      - python-openstackclient
+      - libvirt
+      - virt-manager
+      - shotwell
+    trim_packages:
+      - gnome-documents
+      - gnome-boxes
+      - gnome-todo
+      - gnome-software
+      - totem
+      - gnome-music
+      - epiphany
+
+  tasks:
+    - name: Install sudo
+      package:
+        name: sudo
+        state: present
+    - name: Let wheel group members use sudo without a password
+      lineinfile:
+        path: /etc/sudoers.d/wheel
+        create: yes
+        regexp: '^%wheel\s'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+    - name: Add Pre-Requisite Packages
+      package:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - git
+        - base-devel
+    - name: Find out whether yay-bin is installed
+      command: pacman -Q yay-bin
+      register: yay_installed
+      failed_when: yay_installed.rc >=2
+    - name: Add a makepkg group for makepkg building in /usr/src
+      group:
+        name: makepkg
+        state: present    
+      when: yay_installed.stderr is search("not found")
+    - name: Add Bootstrap Build user
+      user:
+        name: build
+        comment: Bootstrap Build User
+        groups: wheel,makepkg
+        append: yes
+      when: yay_installed.stderr is search("not found")
+    - name: Create AUR Build directory
+      file:
+        path: /usr/src/aur
+        state: directory
+        owner: root
+        group: makepkg
+        mode: 0775
+      when: yay_installed.stderr is search("not found")
+    - name: Checkout yay-bin into /usr/src/aur for installation
+      git: 
+        repo: https://aur.archlinux.org/yay-bin.git
+        dest: /usr/src/aur/yay-bin
+        update: yes
+      when: yay_installed.stderr is search("not found")
+    - name: Set proper permissions on yay-bin build directory
+      file:
+        path: /usr/src/aur/yay-bin
+        recurse: yes
+        state: directory
+        owner: root
+        group: makepkg
+        mode: 0775
+      when: yay_installed.stderr is search("not found")
+    - name: Install yay-bin via AUR
+      shell: sudo -u build makepkg -rsi --noconfirm
+      args:
+        chdir: /usr/src/aur/yay-bin
+      when: yay_installed.stderr is search("not found")
+    - name: Delete AUR Build directory
+      file:
+        path: /usr/src/aur
+        state: absent
+    - name: Remove Bootstrap Build user
+      user:
+        name: build
+        state: absent
+    - name: Add desired packages
+      pacman:
+        name: "{{ add_packages }}"
+        state: latest
+    - name: Trim unneeded packages
+      pacman:
+        name: "{{ trim_packages }}"
+        state: absent
+        recurse: yes
